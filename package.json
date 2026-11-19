@@ -1,14 +1,41 @@
 {
   "name": "claude-model-triage",
-  "version": "1.0.0",
-  "description": "Task difficulty triage for Anthropic Claude models and effort levels",
-  "main": "model-policy.ts",
-  "types": "model-policy.ts",
+  "version": "1.1.0",
+  "description": "Configurable task difficulty triage for Anthropic Claude models and effort levels",
+  "type": "module",
+  "main": "./model-policy.ts",
+  "types": "./model-policy.ts",
+  "exports": {
+    ".": {
+      "import": "./model-policy.ts",
+      "types": "./model-policy.ts"
+    }
+  },
+  "files": [
+    "model-policy.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit model-policy.ts"
+  },
   "dependencies": {
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "typescript": "^5.5.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/isaac-genlimitless/claude-model-triage.git"
+  },
+  "keywords": [
+    "anthropic",
+    "claude",
+    "model-selection",
+    "effort",
+    "triage",
+    "llm"
+  ]
 }

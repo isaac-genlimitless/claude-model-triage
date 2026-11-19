@@ -1,8 +1,7 @@
 import { z } from "zod";
 
-// Single source of truth for which model and effort an agent run uses.
-// Precedence: explicit override (hand-off or chat box) > the agent's own default > trigger rules > global default.
-// No database imports here on purpose: the chat UI and the tests use this file too.
+// Configurable source of truth for which model and effort an agent run uses.
+// Precedence: explicit override > agent default > trigger/role rules > global default.
 
 export const EFFORTS = ["low", "medium", "high"] as const;
 export type Effort = (typeof EFFORTS)[number];
@@ -22,20 +21,87 @@ export const effortSchema = z.enum(EFFORTS);
 
 export const DEFAULT_MODEL = "claude-sonnet-5-5";
 export const CHEAP_MODEL = "claude-haiku-4-5";
-const CHEAP_TRIGGERS = new Set(["event_prep"]);
-const LOW_EFFORT_TRIGGERS = new Set(["inbound_texts"]);
 
-// Anything that drafts to outsiders stays off Haiku: it read UTC as local for a time sent to someone else.
-export const OUTSIDER_DRAFTING = new Set(["inbound_email", "inbound_texts", "inbound_sweep"]);
-
-export const modelFor = (trigger: string) => (CHEAP_TRIGGERS.has(trigger) ? CHEAP_MODEL : DEFAULT_MODEL);
-
-// Default effort is high for code work and triage; low for inbound texts; medium otherwise.
-export function effortFor(trigger: string, slug: string): Effort {
-  if (LOW_EFFORT_TRIGGERS.has(trigger)) return "low";
-  if (slug === "full_stack_engineer" || trigger === "triage") return "high";
-  return "medium";
+/** Configuration for which triggers/roles map to cheaper models, lower effort, or outsider-drafting restrictions. */
+export interface ModelPolicyConfig {
+  /** Triggers that should use the cheap (Haiku) model. Default: ["event_prep"] */
+  cheapTriggers?: string[];
+  /** Triggers that should use low effort. Default: ["inbound_texts"] */
+  lowEffortTriggers?: string[];
+  /** Agent slugs or triggers that draft to outsiders (Haiku is refused for these). Default: ["inbound_email", "inbound_texts", "inbound_sweep"] */
+  outsiderDrafting?: string[];
+  /** Agent slugs that should use high effort by default. Default: ["full_stack_engineer"] */
+  highEffortSlugs?: string[];
+  /** Triggers that should use high effort by default. Default: ["triage"] */
+  highEffortTriggers?: string[];
 }
+
+const DEFAULT_CONFIG: Required<ModelPolicyConfig> = {
+  cheapTriggers: ["event_prep"],
+  lowEffortTriggers: ["inbound_texts"],
+  outsiderDrafting: ["inbound_email", "inbound_texts", "inbound_sweep"],
+  highEffortSlugs: ["full_stack_engineer"],
+  highEffortTriggers: ["triage"],
+};
+
+export function createPolicy(config: ModelPolicyConfig = {}) {
+  const cfg: Required<ModelPolicyConfig> = {
+    cheapTriggers: config.cheapTriggers ?? DEFAULT_CONFIG.cheapTriggers,
+    lowEffortTriggers: config.lowEffortTriggers ?? DEFAULT_CONFIG.lowEffortTriggers,
+    outsiderDrafting: config.outsiderDrafting ?? DEFAULT_CONFIG.outsiderDrafting,
+    highEffortSlugs: config.highEffortSlugs ?? DEFAULT_CONFIG.highEffortSlugs,
+    highEffortTriggers: config.highEffortTriggers ?? DEFAULT_CONFIG.highEffortTriggers,
+  };
+
+  const cheapTriggers = new Set(cfg.cheapTriggers);
+  const lowEffortTriggers = new Set(cfg.lowEffortTriggers);
+  const outsiderDrafting = new Set(cfg.outsiderDrafting);
+  const highEffortSlugs = new Set(cfg.highEffortSlugs);
+  const highEffortTriggers = new Set(cfg.highEffortTriggers);
+
+  const modelFor = (trigger: string) => (cheapTriggers.has(trigger) ? CHEAP_MODEL : DEFAULT_MODEL);
+
+  function effortFor(trigger: string, slug: string): Effort {
+    if (lowEffortTriggers.has(trigger)) return "low";
+    if (highEffortSlugs.has(slug) || highEffortTriggers.has(trigger)) return "high";
+    return "medium";
+  }
+
+  function assertModelAllowed(model: string, slug: string, trigger: string) {
+    if (model === CHEAP_MODEL && (outsiderDrafting.has(slug) || outsiderDrafting.has(trigger)))
+      throw new Error(
+        `Haiku is refused for '${slug}' (${trigger}): it drafts to outsiders. Use a stronger model.`
+      );
+  }
+
+  function resolveModelEffort(a: {
+    override?: { model?: string | null; effort?: string | null };
+    agentDefault?: { model?: string | null; effort?: string | null };
+    trigger: string;
+    slug: string;
+  }): { model: string; effort?: Effort } {
+    const o = a.override || {};
+    const d = a.agentDefault || {};
+    const explicit = o.model || d.model;
+    const model = explicit || modelFor(a.trigger);
+    if (explicit) assertModelAllowed(model, a.slug, a.trigger);
+    if (!supportsEffort(model)) return { model };
+    const effort = (o.effort || d.effort || effortFor(a.trigger, a.slug)) as Effort;
+    return { model, effort };
+  }
+
+  return {
+    config: cfg,
+    modelFor,
+    effortFor,
+    assertModelAllowed,
+    resolveModelEffort,
+  };
+}
+
+// Default policy (matches original hardcoded behavior)
+export const defaultPolicy = createPolicy();
+export const { resolveModelEffort, effortFor, modelFor, assertModelAllowed } = defaultPolicy;
 
 export const modelInfo = (id: string) => MODELS.find((m) => m.id === id);
 export const supportsEffort = (id: string) => (modelInfo(id)?.efforts.length ?? 0) > 0;
@@ -50,30 +116,8 @@ export function validateModelEffort(model?: string | null, effort?: string | nul
   if (model && effort && !supportsEffort(model)) throw new Error(`${modelInfo(model)!.label} has no effort setting; leave effort empty. ${allowedText()}`);
 }
 
-/** Haiku is refused for runs that draft to outsiders (agents and triggers in OUTSIDER_DRAFTING). */
-export function assertModelAllowed(model: string, slug: string, trigger: string) {
-  if (model === CHEAP_MODEL && (OUTSIDER_DRAFTING.has(slug) || OUTSIDER_DRAFTING.has(trigger)))
-    throw new Error(`Haiku 4.5 is refused for '${slug}' (${trigger}): it drafts to outsiders and Haiku misread UTC for a time sent to someone else. Use claude-sonnet-5-5 or claude-opus-5-5.`);
-}
-
-export function resolveModelEffort(a: {
-  override?: { model?: string | null; effort?: string | null };
-  agentDefault?: { model?: string | null; effort?: string | null };
-  trigger: string;
-  slug: string;
-}): { model: string; effort?: Effort } {
-  const o = a.override || {};
-  const d = a.agentDefault || {};
-  const explicit = o.model || d.model;
-  const model = explicit || modelFor(a.trigger);
-  if (explicit) assertModelAllowed(model, a.slug, a.trigger);
-  if (!supportsEffort(model)) return { model };
-  const effort = (o.effort || d.effort || effortFor(a.trigger, a.slug)) as Effort;
-  return { model, effort };
-}
-
 export const MODEL_GUIDANCE = `Pick the cheapest model/effort that does the job:
-- Easy (inbox triage, status lookups, reformatting): claude-haiku-4-5 (no effort), or claude-sonnet-5-5 with effort low.
+- Easy (simple lookups, reformatting, status checks): claude-haiku-4-5 (no effort), or claude-sonnet-5-5 with effort low.
 - Normal: claude-sonnet-5-5, medium (the default; leave model/effort out).
-- Hard (strategy, code review, resumes, multi-step research): claude-opus-5-5, high.
-Never choose Haiku for anything that drafts to outsiders (inbound email, texts or the inbound sweep).`;
+- Hard (strategy, code review, multi-step research, complex reasoning): claude-opus-5-5, high.
+Never choose Haiku for anything that drafts to outsiders.`;

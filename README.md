@@ -1,33 +1,60 @@
 # Claude Model Triage
 
-Public, sanitized extraction of the task difficulty triage logic used to select the correct Anthropic Claude model and effort level based on task trigger and agent role.
+Configurable library for selecting the right Anthropic Claude model and effort level based on task type and agent role.
 
-## Overview
+Model IDs are left as the original internal ones (`claude-haiku-4-5`, `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-fable-5-1`). Swap them for real Anthropic model IDs when you integrate with the API.
 
-This module provides a single source of truth for routing agent runs to appropriate Claude models (`claude-haiku-4-5`, `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-fable-5-1`) and effort levels (`low`, `medium`, `high`).
-
-### Key Features
-
-- **Precedence**: Explicit override > agent default > trigger/role rules > global default.
-- **Cheap model for simple triggers**: e.g., `event_prep` uses Haiku.
-- **Effort mapping**: High for code/engineering and triage tasks; low for certain inbound text handling; medium otherwise.
-- **Safety**: Refuses Haiku for any drafting to outsiders (to avoid timezone or precision issues).
-- **Validation**: Zod schemas and runtime checks for allowed model/effort pairs.
-
-## Usage
+## Quick start
 
 ```ts
-import { resolveModelEffort } from "./model-policy";
+import { resolveModelEffort, createPolicy } from "./model-policy.ts";
 
+// Use the default rules (same as the original internal system)
 const { model, effort } = resolveModelEffort({
   trigger: "triage",
   slug: "full_stack_engineer",
-  // optional override or agentDefault
+});
+// → { model: "claude-sonnet-5-5", effort: "high" }
+
+// Or create a custom policy for your own triggers/roles
+const myPolicy = createPolicy({
+  cheapTriggers: ["simple_lookup", "status"],
+  highEffortSlugs: ["engineer", "researcher"],
+  highEffortTriggers: ["complex_analysis"],
+  lowEffortTriggers: ["quick_reply"],
+  outsiderDrafting: ["email_draft", "customer_message"], // Haiku refused for these
+});
+
+const result = myPolicy.resolveModelEffort({
+  trigger: "complex_analysis",
+  slug: "researcher",
+  override: { effort: "medium" }, // explicit override wins
 });
 ```
 
-See `model-policy.ts` for the full implementation and guidance string.
+## Configuration
+
+`createPolicy(config)` accepts:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `cheapTriggers` | `["event_prep"]` | Triggers that use the cheap (Haiku) model |
+| `lowEffortTriggers` | `["inbound_texts"]` | Triggers that default to low effort |
+| `highEffortSlugs` | `["full_stack_engineer"]` | Agent slugs that default to high effort |
+| `highEffortTriggers` | `["triage"]` | Triggers that default to high effort |
+| `outsiderDrafting` | `["inbound_email", "inbound_texts", "inbound_sweep"]` | Triggers/slugs where Haiku is refused |
+
+Precedence is always: **explicit override > agent default > configured rules > global default**.
+
+## Validation helpers
+
+```ts
+import { validateModelEffort, supportsEffort, modelInfo } from "./model-policy.ts";
+
+validateModelEffort("claude-sonnet-5-5", "high"); // ok
+validateModelEffort("claude-haiku-4-5", "medium"); // throws — Haiku has no effort
+```
 
 ## License
 
-MIT (extracted and sanitized for public use).
+MIT
