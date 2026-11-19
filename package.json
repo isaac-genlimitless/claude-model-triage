@@ -1,29 +1,33 @@
 {
   "name": "claude-model-triage",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "Configurable task difficulty triage for Anthropic Claude models and effort levels",
   "type": "module",
-  "main": "./model-policy.ts",
-  "types": "./model-policy.ts",
+  "main": "./dist/model-policy.js",
+  "types": "./dist/model-policy.d.ts",
   "exports": {
     ".": {
-      "import": "./model-policy.ts",
-      "types": "./model-policy.ts"
+      "types": "./dist/model-policy.d.ts",
+      "import": "./dist/model-policy.js"
     }
   },
   "files": [
-    "model-policy.ts",
+    "dist",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit model-policy.ts"
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "node --test \"test/*.test.ts\"",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "typescript": "^5.5.0"
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
   },
   "license": "MIT",
   "repository": {
@@ -37,5 +41,8 @@
     "effort",
     "triage",
     "llm"
-  ]
+  ],
+  "engines": {
+    "node": ">=22.18"
+  }
 }
