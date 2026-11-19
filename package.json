@@ -1,0 +1,14 @@
+{
+  "name": "claude-model-triage",
+  "version": "1.0.0",
+  "description": "Task difficulty triage for Anthropic Claude models and effort levels",
+  "main": "model-policy.ts",
+  "types": "model-policy.ts",
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  },
+  "license": "MIT"
+}
