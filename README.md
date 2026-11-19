@@ -2,8 +2,6 @@
 
 Configurable library for selecting the right Anthropic Claude model and effort level based on task type and agent role.
 
-Model IDs are left as the original internal ones (`claude-haiku-4-5`, `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-fable-5-1`). Swap them for real Anthropic model IDs when you integrate with the API.
-
 ## Quick start
 
 ```ts
